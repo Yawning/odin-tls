@@ -1,0 +1,4 @@
+*.txt
+*.pcapng
+smoke-test/tls-test
+smoke-test/smoke-test

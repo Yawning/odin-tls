@@ -1237,7 +1237,7 @@ do_certificate :: proc(
 		}
 
 		buffer_send_alert(record_buf, socket, alert)
-		return leaf, leaf_data, alert_to_error(alert)
+		return leaf, leaf_data, alert_to_error(.Fatal, alert)
 	}
 	delete(verified_chain, allocator)
 

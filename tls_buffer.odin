@@ -208,7 +208,7 @@ buffer_write_opaque_bytes :: proc(buf: ^Buffer, b: []byte, $LEN_BYTES: int) -> i
 		}
 		buffer_write_u16(buf, u16(n)) or_return
 	case:
-		// No individual field exceeds 2^16 bytes.
+		// We write no individual field that exceeds 2^16-1 bytes.
 		return io.Error.Unsupported
 	}
 
@@ -235,7 +235,7 @@ buffer_write_opaque_u16s :: proc(buf: ^Buffer, d: []u16, $LEN_BYTES: int) -> io.
 		}
 		buffer_write_u16(buf, u16(n)) or_return
 	case:
-		// No individual field exceeds 2^16 bytes.
+		// We write no individual field that exceeds 2^16-1 bytes.
 		return io.Error.Unsupported
 	}
 
@@ -282,49 +282,29 @@ buffer_send :: proc(buf: ^Buffer, sock: net.TCP_Socket) -> (err: Error) {
 	return
 }
 
-@(require_results, private="file")
-buffer_check_read :: #force_inline proc(buf: ^Buffer, sz: int) -> io.Error {
-	if sz < 0 || buf.idx + sz > buf.off {
-		return io.Error.Unexpected_EOF
-	}
-	return nil
-}
-
 @(require_results)
-buffer_read_u8 :: proc(buf: ^Buffer) -> (v: u8, err: io.Error) {
-	buffer_check_read(buf, 1) or_return
-
+buffer_unchecked_read_u8 :: #force_inline proc(buf: ^Buffer) -> (v: u8) {
 	v = buf.b[buf.idx]
 	buf.idx += 1
-
 	return
 }
 
 @(require_results)
-buffer_read_u16 :: proc(buf: ^Buffer) -> (v: u16, err: io.Error) {
-	buffer_check_read(buf, 2) or_return
-
+buffer_unchecked_read_u16 :: #force_inline proc(buf: ^Buffer) -> (v: u16) {
 	v = endian.unchecked_get_u16be(buf.b[buf.idx:])
 	buf.idx += 2
-
 	return
 }
 
 @(require_results)
-buffer_read_u24 :: proc(buf: ^Buffer) -> (v: int, err: io.Error) {
-	buffer_check_read(buf, 3) or_return
-
+buffer_unchecked_read_u24 :: #force_inline proc(buf: ^Buffer) -> (v: int) {
 	v = unchecked_get_u24be(buf.b[buf.idx:])
 	buf.idx += 3
-
 	return
 }
 
-@(require_results)
-buffer_read_bytes :: proc(buf: ^Buffer, dst: []byte) -> (err: io.Error) {
+buffer_unchecked_read_bytes :: #force_inline proc(buf: ^Buffer, dst: []byte) {
 	l := len(dst)
-	buffer_check_read(buf, l) or_return
-
 	copy(dst, buf.b[buf.idx:])
 	buf.idx += l
 
@@ -332,11 +312,57 @@ buffer_read_bytes :: proc(buf: ^Buffer, dst: []byte) -> (err: io.Error) {
 }
 
 @(require_results)
-buffer_read_skip :: proc(buf: ^Buffer, n: int) -> (dst: []byte, err: io.Error) {
-	buffer_check_read(buf, n) or_return
-
-	dst = buf.b[buf.idx:buf.idx+n]
+buffer_unchecked_read_skip :: #force_inline proc(buf: ^Buffer, n: int) -> (dst: []byte) {
+	#no_bounds_check dst = buf.b[buf.idx:buf.idx+n]
 	buf.idx += n
 
 	return
+}
+
+@(private="file", require_results)
+buffer_check_read :: #force_inline proc(buf: ^Buffer, sz: int) -> Error {
+	if sz < 0 || buf.idx + sz > buf.off {
+		return io.Error.Unexpected_EOF
+	}
+	return nil
+}
+
+@(require_results)
+buffer_read_u8 :: proc(buf: ^Buffer) -> (v: u8, err: Error) {
+	buffer_check_read(buf, 1) or_return
+	return buffer_unchecked_read_u8(buf), nil
+}
+
+@(require_results)
+buffer_read_u16 :: proc(buf: ^Buffer) -> (v: u16, err: Error) {
+	buffer_check_read(buf, 2) or_return
+	return buffer_unchecked_read_u16(buf), nil
+}
+
+@(require_results)
+buffer_read_u24 :: proc(buf: ^Buffer) -> (v: int, err: Error) {
+	buffer_check_read(buf, 3) or_return
+	return buffer_unchecked_read_u24(buf), nil
+}
+
+@(require_results)
+buffer_read_opaque_bytes :: proc(buf: ^Buffer, $LEN_BYTES: int) -> (dst: []byte, err: Error) {
+	buffer_check_read(buf, LEN_BYTES) or_return
+
+	l: int
+	switch LEN_BYTES {
+	case 1:
+		l = int(buffer_unchecked_read_u8(buf))
+	case 2:
+		l = int(buffer_unchecked_read_u16(buf))
+	case 3:
+		l = buffer_unchecked_read_u24(buf)
+	case:
+		// No individual field exceeds 2^24-1 bytes.
+		return nil, io.Error.Unsupported
+	}
+
+	buffer_check_read(buf, l) or_return
+
+	return buffer_unchecked_read_skip(buf, l), nil
 }

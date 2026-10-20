@@ -113,7 +113,8 @@ msg_loop:
 
 		if l := buffer_unread_len(&data_buf); l > 0 {
 			resp.n = min(l, len(req.data))
-			resp.err = buffer_read_bytes(&data_buf, req.data[:resp.n])
+			resp.err = nil
+			buffer_unchecked_read_bytes(&data_buf, req.data[:resp.n])
 			chan.send(resp_ch, resp)
 			continue
 		}
@@ -210,7 +211,7 @@ msg_loop:
 
 			resp.err = nil
 			resp.n = min(resp.n, len(req.data))
-			_ = buffer_read_bytes(&rx_buf, req.data[:resp.n])
+			buffer_unchecked_read_bytes(&rx_buf, req.data[:resp.n])
 
 			if buffer_unread_len(&rx_buf) > 0 {
 				buffer_clear(&data_buf)

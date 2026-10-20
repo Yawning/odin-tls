@@ -441,7 +441,7 @@ buffer_recv_raw_record :: proc(
 	buffer_write_recv(buf, socket.fd, TLS_RECORD_HEADER_SIZE) or_return
 
 	// Validate the content_type.
-	content_type = Content_Type(buffer_read_u8(buf) or_return)
+	content_type = Content_Type(buffer_unchecked_read_u8(buf))
 	#partial switch content_type {
 	case .Alert, .Change_Cipher_Spec, .Handshake, .Application_Data:
 	case:
@@ -451,10 +451,10 @@ buffer_recv_raw_record :: proc(
 
 	// Ignore the legacy_protocol_version, till we support TLS 1.2,
 	// in which case we care about it for the ServerHello.
-	_ = buffer_read_u16(buf) or_return
+	_ = buffer_unchecked_read_u16(buf)
 
 	// Parse the length.
-	length := int(buffer_read_u16(buf) or_return)
+	length := int(buffer_unchecked_read_u16(buf))
 	max_len := protected ? TLS13_MAX_RECORD_SIZE + TLS13_MAX_AEAD_OVERHEAD : TLS13_MAX_RECORD_SIZE
 	if length > max_len {
 		return .Invalid, Protocol_Error.Record_Overflow
@@ -604,7 +604,7 @@ buffer_read_handshake_msg :: proc(
 			msg_len := unchecked_get_u24be(msg[1:])
 			n := MSG_HDR_SIZE + msg_len
 			if n >= msg_len {
-				return buffer_read_skip(buf, n)
+				return buffer_unchecked_read_skip(buf, n), nil
 			}
 		}
 
@@ -691,7 +691,7 @@ buffer_recv_record :: proc(
 			if buffer_unread_len(buf) != 1 {
 				return content_type, Protocol_Error.Decode_Error
 			}
-			if (buffer_read_u8(buf) or_return) != 0x01 {
+			if buffer_unchecked_read_u8(buf) != 0x01 {
 				return content_type, Protocol_Error.Illegal_Parameter
 			}
 
@@ -759,8 +759,8 @@ buffer_recv_record :: proc(
 	if content_type == .Alert {
 		if buffer_unread_len(buf) == 3 {
 			return .Alert, alert_to_error(
-				Alert_Level(buffer_read_u8(buf) or_return),
-				Alert_Description(buffer_read_u8(buf) or_return),
+				Alert_Level(buffer_unchecked_read_u8(buf)),
+				Alert_Description(buffer_unchecked_read_u8(buf)),
 			)
 		}
 		return .Invalid, Protocol_Error.Bad_Record_Mac

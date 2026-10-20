@@ -191,7 +191,7 @@ _client_handshake :: proc(
 
 		// Check `extensions_length`.
 		l := buffer_unread_len(&msg_buf)
-		if l < 2 || l - 2 != int(buffer_read_u16(&msg_buf) or_return) {
+		if l < 2 || l - 2 != int(buffer_unchecked_read_u16(&msg_buf)) {
 			buffer_send_alert(&record_buf, socket, .Decode_Error)
 			return Protocol_Error.Decode_Error
 		}
@@ -201,13 +201,12 @@ _client_handshake :: proc(
 			// None of the buffer_read calls here can fail because we
 			// at least have the extension type/length, and explicitly
 			// check the data length.
-			extension_type := Extension_Type(buffer_read_u16(&msg_buf) or_return)
-			extension_len := int(buffer_read_u16(&msg_buf) or_return)
-			if extension_len + 4 > l {
-				buffer_send_alert(&record_buf, socket, .Decode_Error)
+			extension_type := Extension_Type(buffer_unchecked_read_u16(&msg_buf))
+			extension_data, err := buffer_read_opaque_bytes(&msg_buf, 2)
+			if err != nil {
+				buffer_send_early_alert(socket, .Decode_Error)
 				return Protocol_Error.Decode_Error
 			}
-			extension_data := buffer_read_skip(&msg_buf, extension_len) or_return
 
 			// Now we work off extension_data, so we can send alerts.
 			#partial switch extension_type {
@@ -303,6 +302,7 @@ _client_handshake :: proc(
 			&record_buf,
 		)
 		if err != nil {
+			// Callee sends alerts for protocol errors.
 			if _, ok := err.(Protocol_Error); !ok {
 				buffer_send_alert(&record_buf, socket, .Decode_Error)
 				return Protocol_Error.Decode_Error
@@ -396,9 +396,9 @@ _client_handshake :: proc(
 			buffer_send_alert(&record_buf, socket, .Decode_Error)
 			return Protocol_Error.Decode_Error
 		}
-		sig_algo := Signature_Scheme(buffer_read_u16(&msg_buf) or_return)
-		sig_len := buffer_read_u16(&msg_buf) or_return
-		if int(sig_len) != buffer_unread_len(&msg_buf) {
+		sig_algo := Signature_Scheme(buffer_unchecked_read_u16(&msg_buf))
+		sig_len := int(buffer_unchecked_read_u16(&msg_buf))
+		if sig_len != buffer_unread_len(&msg_buf) {
 			buffer_send_alert(&record_buf, socket, .Decrypt_Error)
 			return Protocol_Error.Decode_Error
 		}
@@ -516,6 +516,7 @@ _client_handshake :: proc(
 	finished_connection_secrets(&socket._state.secrets, &handshake_keys, &running_hash)
 
 	// Initialize and start the workers.
+	// TODO: Leaks on any of the or_return cases.
 	socket._state.tx_chan = chan.create(chan.Chan(Worker_Req), 3, allocator) or_return
 	socket._state.tx_resp_chan = chan.create(chan.Chan(Worker_Resp), allocator) or_return
 	socket._state.rx_chan = chan.create(chan.Chan(Worker_Req), allocator) or_return
@@ -789,8 +790,8 @@ do_server_hello :: proc(
 		if content_type == .Alert {
 			if buffer_unread_len(&record_buf) == 2 {
 				return alert_to_error(
-					Alert_Level(buffer_read_u8(&record_buf) or_return),
-					Alert_Description(buffer_read_u8(&record_buf) or_return),
+					Alert_Level(buffer_unchecked_read_u8(&record_buf)),
+					Alert_Description(buffer_unchecked_read_u8(&record_buf)),
 				)
 			}
 			return Protocol_Error.Decode_Error
@@ -807,13 +808,13 @@ do_server_hello :: proc(
 		return Protocol_Error.Decode_Error
 	}
 
-	if Handshake_Type(buffer_read_u8(&record_buf) or_return) != .Server_Hello {
+	if Handshake_Type(buffer_unchecked_read_u8(&record_buf)) != .Server_Hello {
 		// Send `unexpected_message` alert.
 		buffer_send_early_alert(socket, .Unexpected_Message)
 		return Protocol_Error.Unexpected_Message
 	}
 
-	payload_len := buffer_read_u24(&record_buf) or_return
+	payload_len := buffer_unchecked_read_u24(&record_buf)
 	switch {
 	case payload_len > buffer_available(&record_buf):
 		// We limit the size of a ServerHello to that of a single
@@ -835,7 +836,7 @@ do_server_hello :: proc(
 		return Protocol_Error.Decode_Error
 	}
 
-	// Ensure we have up to the extensions.
+	// Ensure we have up to the extensions length field.
 	if buffer_unread_len(&record_buf) < 2 + RANDOM_SIZE + 1 + LEGACY_SESSION_ID_SIZE + 2 + 1 + 2 {
 		// Send `decode_error` alert.
 		buffer_send_early_alert(socket, .Decode_Error)
@@ -843,7 +844,7 @@ do_server_hello :: proc(
 	}
 
 	// Check `protocol_version`.
-	if (buffer_read_u16(&record_buf) or_return) != TLS12_PROTOCOL_VERSION {
+	if buffer_unchecked_read_u16(&record_buf) != TLS12_PROTOCOL_VERSION {
 		// Send `protocol_version` alert.
 		buffer_send_early_alert(socket, .Protocol_Version)
 		return Protocol_Error.Protocol_Version
@@ -856,7 +857,7 @@ do_server_hello :: proc(
 	// `44 4F 57 4E 47 52 44 01`, if the server decides to negotiate
 	// TLS 1.2, though this is a TLS 1.3-ism, so should NEVER happen.
 	tmp: [RANDOM_SIZE]byte = ---
-	buffer_read_bytes(&record_buf, tmp[:]) or_return
+	buffer_unchecked_read_bytes(&record_buf, tmp[:])
 	if bytes.equal(tmp[:], HELLO_RETRY_REQUEST_RANDOM) {
 		// Send `unexpected_message` alert.
 		buffer_send_early_alert(socket, .Unexpected_Message)
@@ -864,13 +865,13 @@ do_server_hello :: proc(
 	}
 
 	// Check `legacy_session_id_echo`.
-	session_id_len := buffer_read_u8(&record_buf) or_return
+	session_id_len := buffer_unchecked_read_u8(&record_buf)
 	if session_id_len != LEGACY_SESSION_ID_SIZE {
 		// Send `illegal_parameter` alert.
 		buffer_send_early_alert(socket, .Illegal_Parameter)
 		return Protocol_Error.Illegal_Parameter
 	}
-	buffer_read_bytes(&record_buf, tmp[:]) or_return
+	buffer_unchecked_read_bytes(&record_buf, tmp[:])
 	if !bytes.equal(client_session_id, tmp[:]) {
 		// Send `illegal_parameter` alert.
 		buffer_send_early_alert(socket, .Illegal_Parameter)
@@ -878,7 +879,7 @@ do_server_hello :: proc(
 	}
 
 	// Parse `cipher_suite`.
-	socket.cipher_suite = Cipher_Suite(buffer_read_u16(&record_buf) or_return)
+	socket.cipher_suite = Cipher_Suite(buffer_unchecked_read_u16(&record_buf))
 	if _, ok := slice.linear_search(cipher_suites, socket.cipher_suite); !ok {
 		// Send `illegal_parameter` alert.
 		buffer_send_early_alert(socket, .Illegal_Parameter)
@@ -887,7 +888,7 @@ do_server_hello :: proc(
 	aead_algo := CIPHER_SUITE_AEAD[socket.cipher_suite]
 
 	// Check legacy_compression_method.
-	if (buffer_read_u8(&record_buf) or_return) != 0 {
+	if buffer_unchecked_read_u8(&record_buf) != 0 {
 		// Send `illegal_parameter` alert.
 		buffer_send_early_alert(socket, .Illegal_Parameter)
 		return Protocol_Error.Illegal_Parameter
@@ -909,7 +910,7 @@ do_server_hello :: proc(
 	//  - key_share (mandatory)
 	//
 	// Send `unsupported_extension` for anything else.
-	extensions_len := int(buffer_read_u16(&record_buf) or_return)
+	extensions_len := int(buffer_unchecked_read_u16(&record_buf))
 	if buffer_unread_len(&record_buf) != extensions_len {
 		buffer_send_early_alert(socket, .Decode_Error)
 		return Protocol_Error.Decode_Error
@@ -924,20 +925,19 @@ extension_loop:
 		// None of the buffer_read calls here can fail because we
 		// at least have the extension type/length, and explicitly
 		// check the data length.
-		extension_type := Extension_Type(buffer_read_u16(&record_buf) or_return)
-		extension_len := int(buffer_read_u16(&record_buf) or_return)
-		if extension_len + 4 > l {
+		extension_type := Extension_Type(buffer_unchecked_read_u16(&record_buf))
+		extension_data: []byte
+		if extension_data, err = buffer_read_opaque_bytes(&record_buf, 2); err != nil {
 			buffer_send_early_alert(socket, .Decode_Error)
 			return Protocol_Error.Decode_Error
 		}
-		extension_data := buffer_read_skip(&record_buf, extension_len) or_return
 
 		// Now we work off extension_data, so we can send alerts.
 		#partial switch extension_type {
 		case .Supported_Versions:
 			if got_version {
-				is_tls13 = false
-				break extension_loop
+				buffer_send_early_alert(socket, .Illegal_Parameter)
+				return Protocol_Error.Illegal_Parameter
 			}
 			got_version = true
 
@@ -948,8 +948,8 @@ extension_loop:
 			is_tls13 = endian.unchecked_get_u16be(extension_data) == TLS13_PROTOCOL_VERSION
 		case .Key_Share:
 			if got_key_share {
-				got_key_share = false
-				break extension_loop
+				buffer_send_early_alert(socket, .Illegal_Parameter)
+				return Protocol_Error.Illegal_Parameter
 			}
 			got_key_share = true
 
@@ -1013,8 +1013,7 @@ do_certificate_request :: proc(
 	buf:                ^Buffer,
 	record_buf:         ^Buffer,
 ) -> (ctx: []byte, err: Error) {
-	ctx_len := buffer_read_u8(buf) or_return
-	ctx = buffer_read_skip(buf, int(ctx_len)) or_return
+	ctx = buffer_read_opaque_bytes(buf, 1) or_return
 
 	// Parse extensions.
 	extensions_len := int(buffer_read_u16(buf) or_return)
@@ -1043,13 +1042,9 @@ extension_loop:
 		// None of the buffer_read calls here can fail because we
 		// at least have the extension type/length, and explicitly
 		// check the data length.
-		extension_type := Extension_Type(buffer_read_u16(buf) or_return)
-		extension_len := int(buffer_read_u16(buf) or_return)
-		if extension_len + 4 > l {
-			buffer_send_alert(record_buf, socket, .Decode_Error)
-			return nil, Protocol_Error.Decode_Error
-		}
-		extension_data := buffer_read_skip(buf, extension_len) or_return
+		extension_type := Extension_Type(buffer_unchecked_read_u16(buf))
+		extension_data := buffer_read_opaque_bytes(buf, 2) or_return
+		extension_len := len(extension_data)
 
 		if CERTIFICATE_FORBIDDEN_EXTENSIONS[extension_type] {
 			buffer_send_alert(record_buf, socket, .Unsupported_Extension)
@@ -1173,8 +1168,7 @@ do_certificate :: proc(
 	// Parse the certificates.
 	n: int
 	for buffer_unread_len(buf) > 0 {
-		cert_len := buffer_read_u24(buf) or_return
-		cert_der := buffer_read_skip(buf, cert_len) or_return
+		cert_der := buffer_read_opaque_bytes(buf, 3) or_return
 		ext_len := buffer_read_u16(buf) or_return
 		if ext_len != 0 { // We negotiate no extensions.
 			buffer_send_alert(record_buf, socket, .Illegal_Parameter)

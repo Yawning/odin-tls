@@ -57,14 +57,13 @@ worker_sender :: proc(socket: ^Socket) {
 		for l - n > 0 {
 			sz := min(TLS13_MAX_PAYLOAD_SIZE, l - n)
 
-			// None of these can fail.
 			buffer_clear(&tx_buf)
-			_ = buffer_write_u8(&tx_buf, u8(Content_Type.Application_Data))
-			_ = buffer_write_u16(&tx_buf, TLS12_PROTOCOL_VERSION)
-			_ = buffer_write_u16(&tx_buf, u16(sz + TLS13_AEAD_OVERHEAD))
+			buffer_unchecked_write_u8(&tx_buf, u8(Content_Type.Application_Data))
+			buffer_unchecked_write_u16(&tx_buf, TLS12_PROTOCOL_VERSION)
+			buffer_unchecked_write_u16(&tx_buf, u16(sz + TLS13_AEAD_OVERHEAD))
 
-			_ = buffer_write_bytes(&tx_buf, req.data[n:n+sz])
-			_ = buffer_write_u8(&tx_buf, u8(Content_Type.Application_Data))
+			buffer_unchecked_write_bytes(&tx_buf, req.data[n:n+sz])
+			buffer_unchecked_write_u8(&tx_buf, u8(Content_Type.Application_Data))
 
 			if err := buffer_send_record(&tx_buf, socket); err != nil {
 				socket_set_error(socket, err)

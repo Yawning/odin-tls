@@ -119,7 +119,7 @@ buffer_trim_read :: proc(buf: ^Buffer) {
 	copy(buf.b, unread)
 }
 
-@(require_results, private="file")
+@(require_results)
 buffer_check_write :: #force_inline proc(buf: ^Buffer, sz: int) -> io.Error {
 	if sz < 0 || len(buf.b) < buf.off + sz {
 		return io.Error.Short_Buffer
@@ -127,12 +127,35 @@ buffer_check_write :: #force_inline proc(buf: ^Buffer, sz: int) -> io.Error {
 	return nil
 }
 
+buffer_unchecked_write_u8 :: #force_inline proc(buf: ^Buffer, i: u8) {
+	#no_bounds_check buf.b[buf.off] = i
+	buf.off += 1
+}
+
+buffer_unchecked_write_u16 :: #force_inline proc(buf: ^Buffer, i: u16) {
+	endian.unchecked_put_u16be(buf.b[buf.off:], i)
+	buf.off += 2
+}
+
+buffer_unchecked_write_u24 :: #force_inline proc(buf: ^Buffer, i: int) {
+	unchecked_put_u24be(buf.b[buf.off:], i)
+	buf.off += 3
+}
+
+buffer_unchecked_write_u32 :: #force_inline proc(buf: ^Buffer, i: u32) {
+	endian.unchecked_put_u32be(buf.b[buf.off:], i)
+	buf.off += 4
+}
+
+buffer_unchecked_write_bytes :: proc(buf: ^Buffer, b: []byte) {
+	n := copy(buf.b[buf.off:], b)
+	buf.off += n
+}
+
 @(require_results)
 buffer_write_u8 :: proc(buf: ^Buffer, i: u8) -> io.Error {
 	buffer_check_write(buf, 1) or_return
-
-	#no_bounds_check buf.b[buf.off] = i
-	buf.off += 1
+	buffer_unchecked_write_u8(buf, i)
 
 	return nil
 }
@@ -140,9 +163,7 @@ buffer_write_u8 :: proc(buf: ^Buffer, i: u8) -> io.Error {
 @(require_results)
 buffer_write_u16 :: proc(buf: ^Buffer, i: u16) -> io.Error {
 	buffer_check_write(buf, 2) or_return
-
-	endian.unchecked_put_u16be(buf.b[buf.off:], i)
-	buf.off += 2
+	buffer_unchecked_write_u16(buf, i)
 
 	return nil
 }
@@ -154,8 +175,7 @@ buffer_write_u24 :: proc(buf: ^Buffer, i: int) -> io.Error {
 		return io.Error.Unknown
 	}
 
-	unchecked_put_u24be(buf.b[buf.off:], i)
-	buf.off += 3
+	buffer_unchecked_write_u24(buf, i)
 
 	return nil
 }
@@ -163,9 +183,7 @@ buffer_write_u24 :: proc(buf: ^Buffer, i: int) -> io.Error {
 @(require_results)
 buffer_write_u32 :: proc(buf: ^Buffer, i: u32) -> io.Error {
 	buffer_check_write(buf, 4) or_return
-
-	endian.unchecked_put_u32be(buf.b[buf.off:], i)
-	buf.off += 4
+	buffer_unchecked_write_u32(buf, i)
 
 	return nil
 }

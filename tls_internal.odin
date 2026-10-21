@@ -476,11 +476,11 @@ buffer_send_change_cipher_spec :: proc(socket: ^Socket) -> (err: Error) {
 	buf: Buffer
 
 	buffer_init(&buf, ccs_data[:])
-	buffer_write_u8(&buf, u8(Content_Type.Change_Cipher_Spec)) or_return
-	buffer_write_u16(&buf, TLS12_PROTOCOL_VERSION) or_return
-	buffer_write_u16(&buf, 1) or_return
+	buffer_unchecked_write_u8(&buf, u8(Content_Type.Change_Cipher_Spec))
+	buffer_unchecked_write_u16(&buf, TLS12_PROTOCOL_VERSION)
+	buffer_unchecked_write_u16(&buf, 1)
 
-	buffer_write_u8(&buf, 0x01) or_return
+	buffer_unchecked_write_u8(&buf, 0x01)
 
 	return buffer_send(&buf, socket.fd)
 }
@@ -493,12 +493,12 @@ buffer_send_early_alert :: proc(
 	buf: Buffer
 
 	buffer_init(&buf, alert_data[:])
-	buffer_write_u8(&buf, u8(Content_Type.Alert)) or_return
-	buffer_write_u16(&buf, TLS12_PROTOCOL_VERSION) or_return
-	buffer_write_u16(&buf, 2) or_return
+	buffer_unchecked_write_u8(&buf, u8(Content_Type.Alert))
+	buffer_unchecked_write_u16(&buf, TLS12_PROTOCOL_VERSION)
+	buffer_unchecked_write_u16(&buf, 2)
 
-	buffer_write_u8(&buf, u8(alert_to_level(alert))) or_return
-	buffer_write_u8(&buf, u8(alert)) or_return
+	buffer_unchecked_write_u8(&buf, u8(alert_to_level(alert)))
+	buffer_unchecked_write_u8(&buf, u8(alert))
 
 	return buffer_send(&buf, socket.fd)
 }
@@ -508,14 +508,17 @@ buffer_send_alert :: proc(
 	socket: ^Socket,
 	alert:  Alert_Description,
 ) -> (err: Error) {
-	buffer_clear(buf)
-	buffer_write_u8(buf, u8(Content_Type.Application_Data)) or_return
-	buffer_write_u16(buf, TLS12_PROTOCOL_VERSION) or_return
-	buffer_write_u16(buf, 2 + TLS13_AEAD_OVERHEAD) or_return
+	PAYLOAD_SIZE :: 2
 
-	buffer_write_u8(buf, u8(alert_to_level(alert))) or_return
-	buffer_write_u8(buf, u8(alert)) or_return
-	buffer_write_u8(buf, u8(Content_Type.Alert)) or_return
+	buffer_clear(buf)
+	buffer_check_write(buf, TLS_RECORD_HEADER_SIZE + PAYLOAD_SIZE + TLS13_AEAD_OVERHEAD) or_return
+	buffer_unchecked_write_u8(buf, u8(Content_Type.Application_Data))
+	buffer_unchecked_write_u16(buf, TLS12_PROTOCOL_VERSION)
+	buffer_unchecked_write_u16(buf, PAYLOAD_SIZE + TLS13_AEAD_OVERHEAD)
+
+	buffer_unchecked_write_u8(buf, u8(alert_to_level(alert)))
+	buffer_unchecked_write_u8(buf, u8(alert))
+	buffer_unchecked_write_u8(buf, u8(Content_Type.Alert))
 
 	return buffer_send_record(buf, socket)
 }
@@ -525,15 +528,18 @@ buffer_send_key_update :: proc(
 	socket:           ^Socket,
 	update_requested: Key_Update_Request,
 ) -> (err: Error) {
-	buffer_clear(buf)
-	buffer_write_u8(buf, u8(Content_Type.Application_Data)) or_return
-	buffer_write_u16(buf, TLS12_PROTOCOL_VERSION) or_return
-	buffer_write_u16(buf, u16(1 + 3 + 1 + TLS13_AEAD_OVERHEAD)) or_return
+	PAYLOAD_SIZE :: 1 + 3 + 1
 
-	buffer_write_u8(buf, u8(Handshake_Type.Key_Update)) or_return
-	buffer_write_u24(buf, 1) or_return
-	buffer_write_u8(buf, u8(update_requested)) or_return
-	buffer_write_u8(buf, u8(Content_Type.Handshake)) or_return
+	buffer_clear(buf)
+	buffer_check_write(buf, TLS_RECORD_HEADER_SIZE + PAYLOAD_SIZE + TLS13_AEAD_OVERHEAD) or_return
+	buffer_unchecked_write_u8(buf, u8(Content_Type.Application_Data))
+	buffer_unchecked_write_u16(buf, TLS12_PROTOCOL_VERSION)
+	buffer_unchecked_write_u16(buf, PAYLOAD_SIZE + TLS13_AEAD_OVERHEAD)
+
+	buffer_unchecked_write_u8(buf, u8(Handshake_Type.Key_Update))
+	buffer_unchecked_write_u24(buf, 1)
+	buffer_unchecked_write_u8(buf, u8(update_requested))
+	buffer_unchecked_write_u8(buf, u8(Content_Type.Handshake))
 
 	return buffer_send_record(buf, socket)
 }
@@ -553,15 +559,18 @@ buffer_send_finished :: proc(
 
 	derive_connection_finished(secrets, transcript_hash, verify_data, socket._state.secrets.is_client)
 
-	buffer_clear(buf)
-	buffer_write_u8(buf, u8(Content_Type.Application_Data)) or_return
-	buffer_write_u16(buf, TLS12_PROTOCOL_VERSION) or_return
-	buffer_write_u16(buf, u16(3 + 1 + hash_len + TLS13_AEAD_OVERHEAD)) or_return
+	payload_size := 3 + 1 + hash_len
 
-	buffer_write_u8(buf, u8(Handshake_Type.Finished)) or_return
-	buffer_write_u24(buf, hash_len) or_return
-	buffer_write_bytes(buf, verify_data) or_return
-	buffer_write_u8(buf, u8(Content_Type.Handshake)) or_return
+	buffer_clear(buf)
+	buffer_check_write(buf, TLS_RECORD_HEADER_SIZE + payload_size + TLS13_AEAD_OVERHEAD) or_return
+	buffer_unchecked_write_u8(buf, u8(Content_Type.Application_Data))
+	buffer_unchecked_write_u16(buf, TLS12_PROTOCOL_VERSION)
+	buffer_unchecked_write_u16(buf, u16(payload_size + TLS13_AEAD_OVERHEAD))
+
+	buffer_unchecked_write_u8(buf, u8(Handshake_Type.Finished))
+	buffer_unchecked_write_u24(buf, hash_len)
+	buffer_unchecked_write_bytes(buf, verify_data)
+	buffer_unchecked_write_u8(buf, u8(Content_Type.Handshake))
 
 	return buffer_send_record(buf, socket)
 }
@@ -572,16 +581,19 @@ buffer_send_empty_certificate :: proc(
 	socket:      ^Socket,
 	request_ctx: []byte,
 ) -> (err: Error) {
-	buffer_clear(buf)
-	buffer_write_u8(buf, u8(Content_Type.Application_Data)) or_return
-	buffer_write_u16(buf, TLS12_PROTOCOL_VERSION) or_return
-	buffer_write_u16(buf, u16(1 + 1 + len(request_ctx) + 3 + TLS13_AEAD_OVERHEAD)) or_return
+	payload_size := 1 + 1 + len(request_ctx) + 3
 
-	buffer_write_u8(buf, u8(Handshake_Type.Certificate)) or_return
-	buffer_write_u8(buf, u8(len(request_ctx))) or_return
-	buffer_write_bytes(buf, request_ctx) or_return
-	buffer_write_u24(buf, 0) or_return
-	buffer_write_u8(buf, u8(Content_Type.Handshake)) or_return
+	buffer_clear(buf)
+	buffer_check_write(buf, TLS_RECORD_HEADER_SIZE + payload_size + TLS13_AEAD_OVERHEAD) or_return
+	buffer_unchecked_write_u8(buf, u8(Content_Type.Application_Data))
+	buffer_unchecked_write_u16(buf, TLS12_PROTOCOL_VERSION)
+	buffer_unchecked_write_u16(buf, u16(payload_size + TLS13_AEAD_OVERHEAD))
+
+	buffer_unchecked_write_u8(buf, u8(Handshake_Type.Certificate))
+	buffer_unchecked_write_u8(buf, u8(len(request_ctx)))
+	buffer_unchecked_write_bytes(buf, request_ctx)
+	buffer_unchecked_write_u24(buf, 0)
+	buffer_unchecked_write_u8(buf, u8(Content_Type.Handshake))
 
 	return buffer_send_record(buf, socket)
 }

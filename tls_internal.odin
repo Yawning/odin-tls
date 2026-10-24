@@ -613,7 +613,7 @@ buffer_read_handshake_msg :: proc(
 		if l := buffer_unread_len(buf); l >= MSG_HDR_SIZE {
 			msg = buffer_unread_bytes(buf)
 			// msg_type := msg[0]
-			msg_len := unchecked_get_u24be(msg[1:])
+			msg_len := int(endian.unchecked_get_unsigned_be(msg[1:], 24))
 			n := MSG_HDR_SIZE + msg_len
 			if n >= msg_len {
 				return buffer_unchecked_read_skip(buf, n), nil

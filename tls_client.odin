@@ -740,9 +740,10 @@ do_client_hello :: proc(
 		buffer_bytes_at(buf, tls_plaintext_len_off),
 		u16(off - (tls_plaintext_len_off + 2)),
 	)
-	unchecked_put_u24be(
+	endian.unchecked_put_unsigned_be(
 		buffer_bytes_at(buf, client_hello_len_off),
-		off - (client_hello_len_off + 3),
+		u64(off - (client_hello_len_off + 3)),
+		24,
 	)
 	endian.unchecked_put_u16be(
 		buffer_bytes_at(buf, extensions_len_off),

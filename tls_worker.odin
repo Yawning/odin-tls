@@ -1,6 +1,7 @@
 #+private
 package tls
 
+import "core:encoding/endian"
 import "core:io"
 import "core:sync"
 import "core:sync/chan"
@@ -171,7 +172,7 @@ msg_loop:
 				}
 				payload := buffer_unread_bytes(&rx_buf)[:l]
 				if payload[0] == u8(Handshake_Type.Key_Update) {
-					if l != 5 || unchecked_get_u24be(payload[1:]) != 1 {
+					if l != 5 || endian.unchecked_get_unsigned_be(payload[1:], 24) != 1 {
 						worker_send_alert(socket, .Decode_Error)
 						socket_set_error(socket, Protocol_Error.Decode_Error)
 						return

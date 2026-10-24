@@ -11,26 +11,6 @@ import "core:net"
 // Everyone is doomed to re-implement `mbuf`/`sk_buf` in one form or
 // another, and we are no different.
 
-unchecked_get_u24be :: #force_inline proc "contextless" (b: []byte) -> int {
-	i: u32
-
-	#no_bounds_check {
-		i = u32(b[0]) << 16
-		i |= u32(b[1]) << 8
-		i |= u32(b[2])
-	}
-
-	return int(i)
-}
-
-unchecked_put_u24be :: #force_inline proc "contextless" (b: []byte, v: int) {
-	#no_bounds_check {
-		b[0] = byte(v >> 16)
-		b[1] = byte(v >> 8)
-		b[2] = byte(v & 0xff)
-	}
-}
-
 Buffer :: struct {
 	b:   []byte,
 	off: int,
@@ -138,7 +118,7 @@ buffer_unchecked_write_u16 :: #force_inline proc(buf: ^Buffer, i: u16) {
 }
 
 buffer_unchecked_write_u24 :: #force_inline proc(buf: ^Buffer, i: int) {
-	unchecked_put_u24be(buf.b[buf.off:], i)
+	endian.unchecked_put_unsigned_be(buf.b[buf.off:], u64(i), 24)
 	buf.off += 3
 }
 
@@ -316,7 +296,7 @@ buffer_unchecked_read_u16 :: #force_inline proc(buf: ^Buffer) -> (v: u16) {
 
 @(require_results)
 buffer_unchecked_read_u24 :: #force_inline proc(buf: ^Buffer) -> (v: int) {
-	v = unchecked_get_u24be(buf.b[buf.idx:])
+	v = int(endian.unchecked_get_unsigned_be(buf.b[buf.idx:], 24))
 	buf.idx += 3
 	return
 }

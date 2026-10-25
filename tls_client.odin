@@ -516,11 +516,23 @@ _client_handshake :: proc(
 	finished_connection_secrets(&socket._state.secrets, &handshake_keys, &running_hash)
 
 	// Initialize and start the workers.
-	// TODO: Leaks on any of the or_return cases.
+	err: Error
 	socket._state.tx_chan = chan.create(chan.Chan(Worker_Req), 3, allocator) or_return
-	socket._state.tx_resp_chan = chan.create(chan.Chan(Worker_Resp), allocator) or_return
-	socket._state.rx_chan = chan.create(chan.Chan(Worker_Req), allocator) or_return
-	socket._state.rx_resp_chan = chan.create(chan.Chan(Worker_Resp), allocator) or_return
+	if socket._state.tx_resp_chan, err = chan.create(chan.Chan(Worker_Resp), allocator); err != nil {
+		chan.destroy(socket._state.tx_chan)
+		return err
+	}
+	if socket._state.rx_chan, err = chan.create(chan.Chan(Worker_Req), allocator); err != nil {
+		chan.destroy(socket._state.tx_chan)
+		chan.destroy(socket._state.tx_resp_chan)
+		return err
+	}
+	if socket._state.rx_resp_chan, err = chan.create(chan.Chan(Worker_Resp), allocator); err != nil {
+		chan.destroy(socket._state.tx_chan)
+		chan.destroy(socket._state.tx_resp_chan)
+		chan.destroy(socket._state.rx_chan)
+		return err
+	}
 	sync.wait_group_add(&socket._state.done, 2)
 	thread.create_and_start_with_poly_data(
 		socket,

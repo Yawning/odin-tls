@@ -80,7 +80,7 @@ _client_handshake :: proc(
 	}
 
 	// `server_name` MUST be a FQDN and not an IP address.
-	sni_host := net.parse_address(host_name) == nil ? host_name: ""
+	sni_host := net.parse_address(host_name) == nil ? host_name : ""
 
 	record_data: [TLS13_MAX_RECORD_SIZE+TLS13_MAX_AEAD_OVERHEAD]byte = ---
 	record_buf: Buffer
@@ -222,8 +222,8 @@ _client_handshake :: proc(
 					return Protocol_Error.Illegal_Parameter
 				}
 				if len(extension_data) != 0 {
-					buffer_send_alert(&record_buf, socket, .Decode_Error)
-					return Protocol_Error.Decode_Error
+					buffer_send_alert(&record_buf, socket, .Illegal_Parameter)
+					return Protocol_Error.Illegal_Parameter
 				}
 				got_sni = true
 			case .Application_Layer_Protocol_Negotiation:
@@ -1212,8 +1212,8 @@ do_certificate :: proc(
 	}
 	if n == 0 {
 		// No certificates were found.
-		buffer_send_alert(record_buf, socket, .Decode_Error)
-		return leaf, leaf_data, Protocol_Error.Decode_Error
+		buffer_send_alert(record_buf, socket, .Illegal_Parameter)
+		return leaf, leaf_data, Protocol_Error.Illegal_Parameter
 	}
 
 	if unsafe_skip_verify {

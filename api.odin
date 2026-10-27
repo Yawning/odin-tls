@@ -20,7 +20,7 @@ Error :: union #shared_nil {
 
 // Protocol_Error is errors translated from TLS protocol layer alerts.
 Protocol_Error :: enum {
-	None,
+	None = 0,
 
 	// Alerts
 	Close_Notify,
@@ -90,6 +90,9 @@ Socket_State :: struct {
 	allocator: runtime.Allocator,
 }
 
+// Stream is a handshaked Socket wrapped in an `io.Stream`.
+Stream :: io.Stream
+
 // close will close a Socket, and release related resources.  This will
 // also close the underlying TCP socket.
 //
@@ -97,8 +100,11 @@ Socket_State :: struct {
 // called to free resources and sanitize secrets.
 close :: proc(socket: ^Socket, max_close_wait := 100 * time.Millisecond) {
 	orig_err := socket_error(socket)
-	if orig_err == nil {
+	switch orig_err {
+	case nil:
 		orig_err = io.Error.Closed
+	case io.Error.Closed:
+		return
 	}
 
 	if !socket._state.handshaked {
@@ -139,6 +145,7 @@ close :: proc(socket: ^Socket, max_close_wait := 100 * time.Millisecond) {
 	chan.destroy(socket._state.tx_resp_chan)
 	chan.destroy(socket._state.rx_chan)
 	chan.destroy(socket._state.rx_resp_chan)
+	socket._state.handshaked = false
 
 	// Restore the original error, or set it to Closed.
 	socket_set_error(socket, orig_err)
@@ -248,6 +255,18 @@ socket_error :: proc(socket: ^Socket) -> (err: Error) {
 	return
 }
 
+// to_stream wraps a handshaked Socket in a Stream.
+//
+// The caller MUST call `io.close` or `io.destroy` to clean up
+// resources (or `close` the original socket).
+@(require_results)
+to_stream :: proc(socket: ^Socket) -> Stream {
+	return Stream{
+		procedure = stream_proc,
+		data = socket,
+	}
+}
+
 @(private)
 socket_set_error :: proc(socket: ^Socket, err: Error) -> Error {
 	if sync.guard(&socket._state.err_lock) {
@@ -257,4 +276,68 @@ socket_set_error :: proc(socket: ^Socket, err: Error) -> Error {
 		}
 	}
 	return err
+}
+
+@(private="file")
+stream_proc :: proc(
+	stream_data: rawptr,
+	mode:        io.Stream_Mode,
+	p:           []u8,
+	offset:      i64,
+	whence:      io.Seek_From,
+) -> (n: i64, err: io.Error) {
+	socket := (^Socket)(stream_data)
+
+	#partial switch mode {
+	case .Read:
+		n_, tls_err := recv(socket, p)
+		return i64(n_), to_io_error(tls_err, true)
+	case .Write:
+		n_, tls_err := send(socket, p)
+		return i64(n_), to_io_error(tls_err, false)
+	case .Flush:
+		return 0, nil
+	case .Close, .Destroy:
+		close(socket)
+		return 0, nil
+	case .Query:
+		return io.query_utility({.Read, .Write, .Flush, .Close, .Destroy, .Query})
+	}
+	return 0, .Unsupported
+}
+
+@(private="file")
+to_io_error :: proc(err: Error, is_read: bool) -> io.Error {
+	if err == nil {
+		return nil
+	}
+
+	// Best-effort conversion of the various errors to match
+	// `io.Stream` semantics.
+	#partial switch err_ in err {
+	case io.Error:
+		return err_
+	case net.TCP_Send_Error:
+		#partial switch err_ {
+		case .Not_Connected:
+			return .Closed
+		case .Connection_Closed:
+			return .Unexpected_EOF
+		}
+	case net.TCP_Recv_Error:
+		#partial switch err_ {
+		case .Not_Connected:
+			return .Closed
+		case .Connection_Closed:
+			return .Unexpected_EOF
+		}
+	case Protocol_Error:
+		if err_ == .Close_Notify && is_read {
+			return .EOF
+		}
+	case runtime.Allocator_Error:
+	case General_Error:
+	}
+
+	return .Unknown
 }

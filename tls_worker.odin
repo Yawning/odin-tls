@@ -51,6 +51,7 @@ worker_sender :: proc(socket: ^Socket) {
 				return
 			}
 			update_connection_secret(&socket._state.secrets, true)
+			continue
 		}
 
 		n: int
@@ -180,6 +181,7 @@ msg_loop:
 					switch Key_Update_Request(payload[4]) {
 					case .Update_Not_Requested:
 					case .Update_Requested:
+						// 4.7.3 Ignore iff the send epoch limit will be exceeded.
 						chan.send(socket._state.tx_chan, Worker_Req{op = .Key_Update})
 					case:
 						worker_send_alert(socket, .Illegal_Parameter)
@@ -206,6 +208,7 @@ msg_loop:
 				useless_record_count += 1
 				continue
 			}
+			useless_record_count = 0
 			assert(rx_buf.b[rx_buf.off-1] == u8(content_type))
 			_ = buffer_trim(&rx_buf, 1) // Trim off the `content_type`.
 

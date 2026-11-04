@@ -21,6 +21,18 @@ AEAD_TAG_SIZE :: 16
 @(private="file")
 ZEROES: [hash.MAX_DIGEST_SIZE]byte
 
+AEAD_REKEY_SEQ := #partial [aead.Algorithm]u64 {
+	.AES_GCM_128      = 1 << 24, // < 2^24.5
+	.AES_GCM_256      = 1 << 24, // < 2^24.5
+	.CHACHA20POLY1305 = 1 << 63,
+}
+
+AEAD_ABORT_SEQ := #partial [aead.Algorithm]u64 {
+	.AES_GCM_128      = 23726566, // ~= 2^24.5
+	.AES_GCM_256      = 23726566, // ~= 2^24.5
+	.CHACHA20POLY1305 = 0,
+}
+
 Ephemeral_Keys :: struct {
 	supported_groups: []Named_Group,
 
@@ -371,6 +383,32 @@ finished_connection_secrets :: proc(
 
 	update_connection_aead(secrets, true)
 	update_connection_aead(secrets, false)
+}
+
+can_update_connection_secret :: proc(
+	secrets: ^Connection_Secrets,
+	is_send: bool,
+) -> bool {
+	AEAD_MAX_EPOCH := #partial [aead.Algorithm]u64 {
+		.AES_GCM_128 = (1 << 48), // 4.7.3
+		.AES_GCM_256 = 0,
+		.CHACHA20POLY1305 = 0,
+	}
+
+	aead_state := is_send == secrets.is_client ? &secrets.client_aead : &secrets.server_aead
+	return aead_state.gen + 1 != AEAD_MAX_EPOCH[secrets.aead]
+}
+
+should_update_connection_secret :: proc(
+	secrets: ^Connection_Secrets,
+	is_send: bool,
+) -> bool {
+	if !can_update_connection_secret(secrets, is_send) {
+		return false
+	}
+
+	aead_state := is_send == secrets.is_client ? &secrets.client_aead : &secrets.server_aead
+	return aead_state.seq >= AEAD_REKEY_SEQ[secrets.aead]
 }
 
 update_connection_secret :: proc(

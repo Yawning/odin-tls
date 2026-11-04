@@ -21,7 +21,6 @@ More refinement/testing/review is needed, and I will rebase mercilessly.
 
 ### TODO (In no particular order)
 
-- Re-key before hitting AEAD limits
 - Handle fragmented ServerHello
 - `cookie` extension/HelloRetryRequest
 - PSK key exchange

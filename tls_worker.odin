@@ -1,6 +1,7 @@
 #+private
 package tls
 
+import "base:intrinsics"
 import "core:encoding/endian"
 import "core:io"
 import "core:sync"
@@ -10,6 +11,7 @@ Worker_Op :: enum {
 	Transfer,
 	Alert,
 	Key_Update,
+	Key_Update_Peer,
 }
 
 Worker_Req :: struct {
@@ -33,6 +35,8 @@ worker_sender :: proc(socket: ^Socket) {
 	tx_buf: Buffer
 	buffer_init(&tx_buf, tx_data[:])
 
+	secrets := &socket._state.secrets
+
 	resp: Worker_Resp = ---
 	for {
 		req, ok := chan.recv(socket._state.tx_chan)
@@ -45,18 +49,28 @@ worker_sender :: proc(socket: ^Socket) {
 		case .Alert:
 			_ = buffer_send_alert(&tx_buf, socket, req.alert)
 			return
-		case .Key_Update:
-			if err := buffer_send_key_update(&tx_buf, socket, .Update_Not_Requested); err != nil {
+		case .Key_Update, .Key_Update_Peer:
+			update_requested: Key_Update_Request = req.op == .Key_Update ? .Update_Not_Requested : .Update_Requested
+			if err := buffer_send_key_update(&tx_buf, socket, update_requested); err != nil {
 				socket_set_error(socket, err)
 				return
 			}
-			update_connection_secret(&socket._state.secrets, true)
+			update_connection_secret(secrets, true)
 			continue
 		}
 
 		n: int
 		l := len(req.data)
 		for l - n > 0 {
+			// TODO/perf: Hoist this out of the loop.
+			if intrinsics.unlikely(should_update_connection_secret(secrets, true)) {
+				if err := buffer_send_key_update(&tx_buf, socket, .Update_Not_Requested); err != nil {
+					socket_set_error(socket, err)
+					return
+				}
+				update_connection_secret(secrets, true)
+			}
+
 			sz := min(TLS13_MAX_PAYLOAD_SIZE, l - n)
 
 			buffer_clear(&tx_buf)
@@ -129,6 +143,10 @@ msg_loop:
 			continue
 		}
 
+		secrets := &socket._state.secrets
+		aead_state := secrets.is_client ? &secrets.server_aead : &secrets.client_aead
+
+		last_peer_rekey_sent := aead_state.gen - 1
 		useless_record_count: int
 		for {
 			// Error out on a spam of empty records or `user_canceled` alerts.
@@ -140,7 +158,7 @@ msg_loop:
 				return
 			}
 
-			content_type, err := buffer_recv_record(&rx_buf, socket, socket._state.secrets.is_client)
+			content_type, err := buffer_recv_record(&rx_buf, socket, secrets.is_client)
 
 			// See: https://bugs.openjdk.org/browse/JDK-8323517
 			if content_type == .Alert && err == Protocol_Error.User_Canceled {
@@ -182,14 +200,23 @@ msg_loop:
 					case .Update_Not_Requested:
 					case .Update_Requested:
 						// 4.7.3 Ignore iff the send epoch limit will be exceeded.
-						chan.send(socket._state.tx_chan, Worker_Req{op = .Key_Update})
+						if can_update_connection_secret(secrets, true) {
+							chan.send(socket._state.tx_chan, Worker_Req{op = .Key_Update})
+						}
 					case:
 						worker_send_alert(socket, .Illegal_Parameter)
 						socket_set_error(socket, Protocol_Error.Illegal_Parameter)
 						return
 					}
 
-					update_connection_secret(&socket._state.secrets, false)
+					// Unconditionally update the connection secret, unless
+					// it will wrap.  ie: Do not enforce the 128-bit key limit.
+					if aead_state.gen + 1 == 0 {
+						worker_send_alert(socket, .General_Error)
+						socket_set_error(socket, Protocol_Error.General_Error)
+						return
+					}
+					update_connection_secret(secrets, false)
 					continue
 				}
 
@@ -222,6 +249,17 @@ msg_loop:
 			}
 
 			chan.send(resp_ch, resp)
+
+			// In the unlikely event that the peer has failed to rekey
+			// in a reasonable timeframe, prod them into doing so if
+			// possible.
+			if intrinsics.unlikely(should_update_connection_secret(secrets, false)) {
+				if last_peer_rekey_sent != aead_state.gen {
+					chan.send(socket._state.tx_chan, Worker_Req{op = .Key_Update_Peer})
+				}
+				last_peer_rekey_sent = aead_state.gen
+			}
+
 			break
 		}
 	}

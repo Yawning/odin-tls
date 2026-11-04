@@ -749,9 +749,12 @@ buffer_recv_record :: proc(
 		return .Invalid, Protocol_Error.Bad_Record_Mac
 	}
 
-	// Yes, this discards a valid record, but a 64-bit counter wrapping
-	// will not happen in my lifetime.
-	if aead_state.seq += 1; aead_state.seq == 0 {
+	// See if we ran out of secure sequence number space.  This should
+	// not happen because we proactively request a re-key well in advance.
+	//
+	// Note: We do lose a record, but the amount of data transfered
+	// needed to hit this point is astronomical.
+	if aead_state.seq += 1; aead_state.seq == AEAD_ABORT_SEQ[socket._state.secrets.aead] {
 		return .Invalid, Protocol_Error.Internal_Error
 	}
 
@@ -808,9 +811,12 @@ buffer_send_record :: proc(buf: ^Buffer, socket: ^Socket) -> (err: Error) {
 	tag: [AEAD_TAG_SIZE]byte = ---
 	aead.seal(&aead_state.ctx, payload, tag[:], iv[:], aad, payload)
 
-	// Yes, this discards a valid record, but a 64-bit counter wrapping
-	// will not happen in my lifetime.
-	if aead_state.seq += 1; aead_state.seq == 0 {
+	// See if we ran out of secure sequence number space.  This should
+	// not happen because we proactively re-key well in advance.
+	//
+	// Note: We do lose a record, but the amount of data transfered
+	// needed to hit this point is astronomical.
+	if aead_state.seq += 1; aead_state.seq == AEAD_ABORT_SEQ[socket._state.secrets.aead] {
 		return Protocol_Error.Internal_Error
 	}
 

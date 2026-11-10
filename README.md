@@ -21,18 +21,20 @@ More refinement/testing/review is needed, and I will rebase mercilessly.
 
 ### TODO (In no particular order)
 
-- Handle fragmented ServerHello
-- `cookie` extension/HelloRetryRequest
-- PSK key exchange
-- 0-RTT handshakes
-- Early Data
 - Client certificate authentication
 - [Encrypted ClientHello][5] (ECH)
 - [GREASE][6]
 - [ML-KEM only key agreement][7] (Draft)
 - [AEGIS Cipher Suites][8] (Draft)
-- TLS 1.2 (sensible subset only)
 - Server support (Just use ngnix)
+
+### MIGHTDO
+
+- TLS 1.2 (sensible subset only)
+- `cookie` extension/HelloRetryRequest
+- PSK key exchange
+- 0-RTT handshakes
+- Early Data
 
 ### WONTDO
 
@@ -40,6 +42,7 @@ More refinement/testing/review is needed, and I will rebase mercilessly.
 - ffdhe key agreement
 - secp521r1 support (ECDH/ECDSA, 0 browser support)
 - Ed448 support
+- OCSP support (dead, effectively no active responders)
 
 [1]: https://www.rfc-editor.org/rfc/rfc9846.html
 [2]: https;//www.odin-lang.org

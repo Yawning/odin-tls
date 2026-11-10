@@ -798,8 +798,7 @@ do_server_hello :: proc(
 	buffer_init(&record_buf, record_data[:])
 
 	content_type: Content_Type
-	content_type, err = buffer_recv_raw_record(&record_buf, socket, .Handshake)
-	if err != nil {
+	if content_type, err = buffer_recv_unprotected_handshake_record(&record_buf, socket, .Server_Hello); err != nil {
 		if content_type == .Alert {
 			if buffer_unread_len(&record_buf) == 2 {
 				return alert_to_error(
@@ -812,41 +811,6 @@ do_server_hello :: proc(
 
 		buffer_send_early_alert(socket, error_to_alert(err))
 		return
-	}
-
-	// Ensure we have up to the length field.
-	if buffer_unread_len(&record_buf) < 1 + 3 {
-		// Send `decode_error` alert.
-		buffer_send_early_alert(socket, .Decode_Error)
-		return Protocol_Error.Decode_Error
-	}
-
-	if Handshake_Type(buffer_unchecked_read_u8(&record_buf)) != .Server_Hello {
-		// Send `unexpected_message` alert.
-		buffer_send_early_alert(socket, .Unexpected_Message)
-		return Protocol_Error.Unexpected_Message
-	}
-
-	payload_len := buffer_unchecked_read_u24(&record_buf)
-	switch {
-	case payload_len > buffer_available(&record_buf):
-		// We limit the size of a ServerHello to that of a single
-		// maximum sized TLS 1.3 record, which is overkill given that
-		// it will only contain `supported_version` and a singular
-		// `key_share`.
-		//
-		// Send `decode_error` alert.
-		buffer_send_early_alert(socket, .Decode_Error)
-		return Protocol_Error.Decode_Error
-	case payload_len == buffer_unread_len(&record_buf):
-	case payload_len > buffer_unread_len(&record_buf):
-		// TODO: Fetch till we have the full record.
-		buffer_send_early_alert(socket, .Internal_Error)
-		return General_Error.Unsupported_Fragmented_Handshake_Message
-	case:
-		// Send `decode_error` alert.
-		buffer_send_early_alert(socket, .Decode_Error)
-		return Protocol_Error.Decode_Error
 	}
 
 	// Ensure we have up to the extensions length field.

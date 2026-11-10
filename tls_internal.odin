@@ -471,6 +471,59 @@ buffer_recv_raw_record :: proc(
 }
 
 @(require_results)
+buffer_recv_unprotected_handshake_record :: proc(
+	buf:            ^Buffer,
+	socket:         ^Socket,
+	handshake_type: Handshake_Type,
+) -> (content_type: Content_Type, err: Error) {
+	tmp: [TLS13_MAX_RECORD_SIZE]byte
+	tmp_buf: Buffer
+	buffer_init(&tmp_buf, tmp[:])
+
+	content_type = buffer_recv_raw_record(buf, socket, .Handshake) or_return
+
+	// Ensure we have up to the length field.
+	if buffer_unread_len(buf) < 1 + 3 {
+		return .Invalid, Protocol_Error.Decode_Error
+	}
+
+	if Handshake_Type(buffer_unchecked_read_u8(buf)) != handshake_type {
+		return .Invalid, Protocol_Error.Unexpected_Message
+	}
+
+	// Fast path for non-fragmented responses.
+	payload_len := buffer_unchecked_read_u24(buf)
+	if buffer_unread_len(buf) == payload_len {
+		return
+	}
+
+	// We limit the size of unprotected records to that of a single
+	// maximum sized TLS 1.3 record.
+	if payload_len > buffer_available(buf) {
+		return content_type, Protocol_Error.Decode_Error
+	}
+
+	// Receive additional records.
+	for payload_len != 0 {
+		content_type_ := buffer_recv_raw_record(&tmp_buf, socket, .Handshake) or_return
+		if content_type_ != content_type {
+			return content_type_, Protocol_Error.Unexpected_Message
+		}
+
+		l := buffer_unread_len(&tmp_buf)
+		if l > payload_len {
+			return .Invalid, Protocol_Error.Decode_Error
+		}
+
+		buffer_pullup(buf, &tmp_buf) or_return
+
+		payload_len -= l
+	}
+
+	return
+}
+
+@(require_results)
 buffer_send_change_cipher_spec :: proc(socket: ^Socket) -> (err: Error) {
 	ccs_data: [TLS_RECORD_HEADER_SIZE+1]byte = ---
 	buf: Buffer

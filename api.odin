@@ -57,7 +57,6 @@ Protocol_Error :: enum {
 General_Error :: enum {
 	Invalid_SNI_Hostname,
 	Failed_Key_Share_Generation,
-	Unsupported_Fragmented_Handshake_Message,
 	Unsupported_Client_Certificate_Requested,
 }
 

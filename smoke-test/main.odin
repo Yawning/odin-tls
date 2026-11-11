@@ -1,20 +1,28 @@
 package main
 
+@(require) import "core:io"
 import "core:log"
 import "core:net"
 import "core:os"
 
 import tls "../"
 
-// TARGET_HOST_PORT     :: "127.0.0.1:8080"
-// HTTP_REQUEST : string : "GET /index.html HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
-// SNI_HOST             :: "localhost"
-// INSECURE_SKIP_VERIFY :: true
+// -define:USE_IO_STREAM=true
+USE_STREAM: bool : #config(USE_IO_STREAM, false)
+// -define:USE_EXTERNAL_NETWORK=true
+USE_NETWORK: bool : #config(USE_EXTERNAL_NETWORK, false)
 
-TARGET_HOST_PORT     :: "odin-lang.org:443"
-HTTP_REQUEST : string : "GET / HTTP/1.1\r\nHost: odin-lang.org\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n"
-SNI_HOST             :: "odin-lang.org"
-INSECURE_SKIP_VERIFY :: false
+when USE_NETWORK {
+	TARGET_HOST_PORT     :: "odin-lang.org:443"
+	HTTP_REQUEST : string : "GET / HTTP/1.1\r\nHost: odin-lang.org\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n"
+	SNI_HOST             :: "odin-lang.org"
+	INSECURE_SKIP_VERIFY :: false
+} else {
+	TARGET_HOST_PORT     :: "127.0.0.1:8080"
+	HTTP_REQUEST : string : "GET /index.html HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+	SNI_HOST             :: "localhost"
+	INSECURE_SKIP_VERIFY :: true
+}
 
 main :: proc() {
 	context.logger = log.create_console_logger()
@@ -58,26 +66,56 @@ main :: proc() {
 
 	log.infof("TLS: Handshaked! (ALPN: %v)", tls_sock.alpn_protocol)
 
-	if _, err := tls.send(
-		&tls_sock,
-		transmute([]byte)(HTTP_REQUEST),
-	); err != nil {
-		log.errorf("TLS: Failed to write request: %v", err)
-	}
+	when USE_STREAM {
+		stream := tls.to_stream(&tls_sock)
 
-	log.infof("TLS: Request sent!")
-
-	for {
-		buf: [1024]byte
-		n, err := tls.recv(&tls_sock, buf[:])
-		if err != nil {
-			log.errorf("TLS: Failed to receive: %v", err)
-			break
+		if n, err := io.write_full(
+			stream,
+			transmute([]byte)(HTTP_REQUEST),
+		); err != nil {
+			log.errorf("TLS: Failed to write request: %v (%d written)", err, n)
+			os.exit(1)
 		}
 
-		log.infof("TLS: Response: `%s`\n", buf[:n])
+		log.infof("TLS: Request sent!")
+
+		for {
+			buf: [1024]byte
+			n, err := io.read(stream, buf[:])
+			if err != nil {
+				log.errorf("TLS: Failed to receive: %v", err)
+				break
+			}
+
+			log.infof("TLS: Response: `%s`\n", buf[:n])
+		}
+
+		io.close(stream)
+		io.destroy(stream)
+	} else {
+		if n, err := tls.send(
+			&tls_sock,
+			transmute([]byte)(HTTP_REQUEST),
+		); err != nil {
+			log.errorf("TLS: Failed to write request: %v (%d written)", err, n)
+			os.exit(1)
+		}
+
+		log.infof("TLS: Request sent!")
+
+		for {
+			buf: [1024]byte
+			n, err := tls.recv(&tls_sock, buf[:])
+			if err != nil {
+				log.errorf("TLS: Failed to receive: %v", err)
+				break
+			}
+
+			log.infof("TLS: Response: `%s`\n", buf[:n])
+		}
+
+		tls.close(&tls_sock)
 	}
 
-	tls.close(&tls_sock)
 	log.infof("TLS: Closed: %v\n", tls.socket_error(&tls_sock))
 }

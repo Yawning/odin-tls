@@ -46,6 +46,9 @@ client_handshake :: proc(
 	unsafe_secret_logger: ^os.File = nil,
 	allocator:            runtime.Allocator = context.allocator,
 ) -> Error {
+	if err := net.set_blocking(net_socket, true); err != nil {
+		return General_Error.Nonblocking_Socket
+	}
 	err := _client_handshake(
 		socket,
 		net_socket,

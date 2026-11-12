@@ -55,6 +55,7 @@ Protocol_Error :: enum {
 
 // General_Error are errors related to the implementation.
 General_Error :: enum {
+	Nonblocking_Socket,
 	Invalid_SNI_Hostname,
 	Failed_Key_Share_Generation,
 	Unsupported_Client_Certificate_Requested,
